@@ -1,19 +1,12 @@
 import Icon from '@/components/ui/icon';
 
-type Page = 'home' | 'learn' | 'trainer' | 'stats' | 'table';
+type Page = 'home' | 'trainer' | 'stats' | 'table';
 
 interface HomePageProps {
   onNavigate: (page: Page) => void;
 }
 
 const FEATURES = [
-  {
-    icon: 'BookOpen',
-    title: 'Обучение',
-    desc: 'Изучайте символы поэтапно с визуализацией и звуком',
-    page: 'learn' as Page,
-    color: 'from-blue-500/20 to-blue-600/5',
-  },
   {
     icon: 'Zap',
     title: 'Тренажёр',
@@ -72,15 +65,8 @@ export default function HomePage({ onNavigate }: HomePageProps) {
 
           <div className="flex items-center justify-center gap-3 flex-wrap">
             <button
-              onClick={() => onNavigate('learn')}
-              className="btn-primary flex items-center gap-2"
-            >
-              <Icon name="BookOpen" size={17} />
-              Начать обучение
-            </button>
-            <button
               onClick={() => onNavigate('trainer')}
-              className="btn-outline flex items-center gap-2"
+              className="btn-primary flex items-center gap-2"
             >
               <Icon name="Zap" size={17} />
               Открыть тренажёр
