@@ -1,9 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
-import { MORSE_TABLE, textToMorse } from '@/hooks/useMorse';
+import { MORSE_TABLE, textToMorse, MORSE_RU, MORSE_EN, MORSE_DIGITS } from '@/hooks/useMorse';
 
-const MORSE_REVERSE = Object.fromEntries(
-  Object.entries(MORSE_TABLE).map(([k, v]) => [v, k])
+const MORSE_REVERSE_RU = Object.fromEntries(
+  [...Object.entries(MORSE_RU), ...Object.entries(MORSE_DIGITS)].map(([k, v]) => [v, k])
+);
+const MORSE_REVERSE_EN = Object.fromEntries(
+  [...Object.entries(MORSE_EN), ...Object.entries(MORSE_DIGITS)].map(([k, v]) => [v, k])
 );
 
 const SAMPLE_WORDS_RU = ['СОС', 'МИР', 'ДА', 'НЕТ', 'РАД', 'КОТ', 'ДОМ', 'СОН', 'БАЛ', 'КОД'];
@@ -76,10 +79,11 @@ export default function KeyTrainer() {
   const commitLetter = useCallback((syms: string[]) => {
     if (syms.length === 0) return;
     const code = syms.join('');
-    const letter = MORSE_REVERSE[code] || '?';
+    const reverseTable = lang === 'ru' ? MORSE_REVERSE_RU : MORSE_REVERSE_EN;
+    const letter = reverseTable[code] || '?';
     setDecodedLetters(prev => [...prev, letter]);
     setCurrentLetterSymbols([]);
-  }, []);
+  }, [lang]);
 
   const commitWord = useCallback(() => {
     setDecodedLetters(prev => [...prev, ' ']);
