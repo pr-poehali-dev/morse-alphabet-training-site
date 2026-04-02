@@ -16,6 +16,79 @@ const DATA: Record<TabType, Record<string, string>> = {
   digits: MORSE_DIGITS,
 };
 
+const MNEMONICS: Record<string, string> = {
+  // Русские буквы
+  'А': 'ай-да',
+  'Б': 'бé-ре-гись-ты',
+  'В': 'важ-но-э-то',
+  'Г': 'гóр-ка-вниз',
+  'Д': 'дóм-е-го',
+  'Е': 'есть',
+  'Ж': 'же-ле-зо-здесь',
+  'З': 'зáй-ка-бе-ги',
+  'И': 'и-ди',
+  'К': 'как-же-так',
+  'Л': 'лу-нá-ти-ки',
+  'М': 'мáма',
+  'Н': 'нет-да',
+  'О': 'óко-ло',
+  'П': 'пи-лá-по-ёт',
+  'Р': 'ре-бя-та',
+  'С': 'си-не-е',
+  'Т': 'там',
+  'У': 'у-не-сло',
+  'Ф': 'фи-ли-мó-нов',
+  'Х': 'хи-хи-хи-хи',
+  'Ц': 'цáп-ля-сто-ит',
+  'Ч': 'чер-ти-ла',
+  'Ш': 'ша-ро-ва-ры',
+  'Щ': 'щý-ка-жди',
+  'Ъ': 'твёр-дый-зна-ки',
+  'Ы': 'ты-не-жди',
+  'Ь': 'мягь-ко-жми',
+  'Э': 'э-то-е-го',
+  'Ю': 'ю-ла-крут-ись',
+  'Я': 'я-ра-дист',
+  // Латинские буквы
+  'A': 'a-gain',
+  'B': 'bar-ri-ca-de',
+  'C': 'co-ca-co-la',
+  'D': 'dan-ger',
+  'E': 'e',
+  'F': 'fun-ni-ly-go',
+  'G': 'go-a-head',
+  'H': 'ha-ha-ha-ha',
+  'I': 'i-t',
+  'J': 'jest-in-the-bar',
+  'K': 'co-ming-through',
+  'L': 'la-la-la-la',
+  'M': 'more',
+  'N': 'no-go',
+  'O': 'o-ver-here',
+  'P': 'pi-a-no-keys',
+  'Q': 'god-save-the-queen',
+  'R': 're-do',
+  'S': 'si-si-si',
+  'T': 'tone',
+  'U': 'u-ni-on',
+  'V': 've-ga-vict',
+  'W': 'well-a-way',
+  'X': 'ex-tra-long-dash',
+  'Y': 'you-need-to-go',
+  'Z': 'zi-zi-man',
+  // Цифры
+  '0': 'но-оль-смот-ри-те',
+  '1': 'и-один-толь-ко-раз',
+  '2': 'два-где-же-ты-брат',
+  '3': 'три-е-го-там-нет',
+  '4': 'четыр-е-есть-тут-всё',
+  '5': 'пять-здесь-сто-ит-сам',
+  '6': 'ша-пять-е-ди-ниц',
+  '7': 'семь-здесь-дол-га-нет',
+  '8': 'восемь-та-ки-да-нет',
+  '9': 'де-вять-та-ки-ноль',
+};
+
 function MorseVisual({ code }: { code: string }) {
   return (
     <div className="flex items-center gap-1">
@@ -118,6 +191,9 @@ export default function TablePage() {
               {code}
             </div>
             <MorseVisual code={code} />
+            {MNEMONICS[letter] && (
+              <div className="mt-2 text-xs text-muted-foreground italic truncate">{MNEMONICS[letter]}</div>
+            )}
           </div>
         ))}
       </div>

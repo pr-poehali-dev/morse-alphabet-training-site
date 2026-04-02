@@ -30,12 +30,7 @@ const FEATURES = [
   },
 ];
 
-const FACTS = [
-  { label: '33 буквы', desc: 'Русского алфавита в кодах Морзе' },
-  { label: '26 букв', desc: 'Латинского алфавита' },
-  { label: '10 цифр', desc: 'И знаки препинания' },
-  { label: '1836 г.', desc: 'Год изобретения азбуки Морзе' },
-];
+
 
 export default function HomePage({ onNavigate }: HomePageProps) {
   return (
@@ -73,15 +68,6 @@ export default function HomePage({ onNavigate }: HomePageProps) {
             </button>
           </div>
         </div>
-      </section>
-
-      <section className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-14">
-        {FACTS.map(f => (
-          <div key={f.label} className="card-morse text-center">
-            <div className="text-2xl font-black text-primary mb-1">{f.label}</div>
-            <div className="text-xs text-muted-foreground leading-snug">{f.desc}</div>
-          </div>
-        ))}
       </section>
 
       <section className="mb-14">
