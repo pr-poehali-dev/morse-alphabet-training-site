@@ -35,11 +35,13 @@ export default function GroupTrainer() {
   const [groups, setGroups] = useState<Group[]>(() => generateGroups(5, 'ru'));
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeGroup, setActiveGroup] = useState<number | null>(null);
+  const [played, setPlayed] = useState(false);
   const { playMorse, stop } = useMorse();
 
   const handleGenerate = useCallback(() => {
     setGroups(generateGroups(groupCount, charSet));
     setActiveGroup(null);
+    setPlayed(false);
   }, [groupCount, charSet]);
 
   const handlePlay = useCallback(async () => {
@@ -65,6 +67,7 @@ export default function GroupTrainer() {
 
     setIsPlaying(false);
     setActiveGroup(null);
+    setPlayed(true);
   }, [isPlaying, groups, wpm, playMorse, stop]);
 
   const handlePlayGroup = useCallback(async (idx: number) => {
@@ -80,6 +83,7 @@ export default function GroupTrainer() {
   const handleNext = () => {
     setGroups(generateGroups(groupCount, charSet));
     setActiveGroup(null);
+    setPlayed(false);
   };
 
   return (
@@ -175,7 +179,7 @@ export default function GroupTrainer() {
       </div>
 
       {/* Проверка */}
-      <div className="card-morse">
+      {played && (<div className="card-morse">
         <div className="text-xs text-muted-foreground mb-3 uppercase tracking-wider">Правильный приём</div>
         <div className="flex flex-wrap gap-3 font-mono text-xl font-bold tracking-widest">
           {groups.map((g, i) => (
@@ -196,7 +200,7 @@ export default function GroupTrainer() {
             Повторить
           </button>
         </div>
-      </div>
+      </div>)}
 
 
     </div>
