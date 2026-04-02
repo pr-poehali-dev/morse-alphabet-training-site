@@ -119,7 +119,7 @@ export default function GroupTrainer() {
               >−</button>
               <span className="w-8 text-center text-sm font-mono font-semibold text-primary">{groupCount}</span>
               <button
-                onClick={() => { const n = Math.min(20, groupCount + 1); setGroupCount(n); setGroups(generateGroups(n, charSet)); }}
+                onClick={() => { const n = Math.min(50, groupCount + 1); setGroupCount(n); setGroups(generateGroups(n, charSet)); }}
                 className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center"
               >+</button>
             </div>
@@ -158,7 +158,7 @@ export default function GroupTrainer() {
               key={i}
               className={`flex items-center justify-center w-10 h-10 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
                 activeGroup === i
-                  ? 'bg-primary border-primary text-primary-foreground scale-110 shadow-[0_0_16px_hsl(var(--amber)/0.5)]'
+                  ? 'bg-primary border-primary text-primary-foreground shadow-[0_0_16px_hsl(var(--amber)/0.5)]'
                   : 'bg-secondary border-border text-muted-foreground hover:border-primary/40'
               }`}
               onClick={() => !isPlaying && handlePlayGroup(i)}
