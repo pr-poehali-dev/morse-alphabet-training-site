@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { useMorse, textToMorse, MORSE_TABLE } from '@/hooks/useMorse';
+import KeyTrainer from '@/components/KeyTrainer';
 
-type Mode = 'listen' | 'input';
+type Mode = 'listen' | 'input' | 'key';
 
 const SAMPLE_WORDS_RU = ['СОС', 'МИР', 'ДА', 'НЕТ', 'РАД', 'КОТ', 'ДОМ', 'РАЙ', 'БАЛ', 'ЗАЛ'];
 const SAMPLE_WORDS_EN = ['SOS', 'YES', 'NO', 'CAT', 'DOG', 'HOME', 'LOVE', 'STAR', 'SKY', 'FIRE'];
@@ -102,33 +103,46 @@ export default function TrainerPage() {
             <Icon name="PenLine" size={14} className="inline mr-1.5" />
             Перевод
           </button>
-        </div>
-
-        <div className="flex gap-1 bg-secondary p-1 rounded-xl">
           <button
-            onClick={() => setLang('ru')}
+            onClick={() => setMode('key')}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              lang === 'ru' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              mode === 'key' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            Рус
-          </button>
-          <button
-            onClick={() => setLang('en')}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              lang === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Eng
+            <Icon name="Radio" size={14} className="inline mr-1.5" />
+            Ключ
           </button>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
-          <span className="text-sm text-muted-foreground">WPM:</span>
-          <button onClick={() => setWpm(w => Math.max(5, w - 2))} className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center">−</button>
-          <span className="w-10 text-center text-sm font-mono font-semibold text-primary">{wpm}</span>
-          <button onClick={() => setWpm(w => Math.min(30, w + 2))} className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center">+</button>
-        </div>
+        {mode !== 'key' && (
+          <div className="flex gap-1 bg-secondary p-1 rounded-xl">
+            <button
+              onClick={() => setLang('ru')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                lang === 'ru' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Рус
+            </button>
+            <button
+              onClick={() => setLang('en')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+                lang === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Eng
+            </button>
+          </div>
+        )}
+
+        {mode !== 'key' && (
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-sm text-muted-foreground">WPM:</span>
+            <button onClick={() => setWpm(w => Math.max(5, w - 2))} className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center">−</button>
+            <span className="w-10 text-center text-sm font-mono font-semibold text-primary">{wpm}</span>
+            <button onClick={() => setWpm(w => Math.min(30, w + 2))} className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center">+</button>
+          </div>
+        )}
       </div>
 
       {mode === 'listen' && (
@@ -262,6 +276,8 @@ export default function TrainerPage() {
           </div>
         </div>
       )}
+
+      {mode === 'key' && <KeyTrainer />}
     </div>
   );
 }
