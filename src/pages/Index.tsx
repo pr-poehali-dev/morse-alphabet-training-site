@@ -1,14 +1,31 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState } from 'react';
+import NavBar from '@/components/NavBar';
+import HomePage from '@/components/HomePage';
+import LearnPage from '@/components/LearnPage';
+import TrainerPage from '@/components/TrainerPage';
+import StatsPage from '@/components/StatsPage';
+import TablePage from '@/components/TablePage';
 
-const Index = () => {
+type Page = 'home' | 'learn' | 'trainer' | 'stats' | 'table';
+
+export default function Index() {
+  const [page, setPage] = useState<Page>('home');
+
+  const renderPage = () => {
+    switch (page) {
+      case 'home': return <HomePage onNavigate={setPage} />;
+      case 'learn': return <LearnPage />;
+      case 'trainer': return <TrainerPage />;
+      case 'stats': return <StatsPage />;
+      case 'table': return <TablePage />;
+      default: return <HomePage onNavigate={setPage} />;
+    }
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4 color-black text-black">Добро пожаловать!</h1>
-        <p className="text-xl text-gray-600">тут будет отображаться ваш проект</p>
-      </div>
+    <div className="min-h-screen bg-background">
+      <NavBar current={page} onChange={setPage} />
+      <main>{renderPage()}</main>
     </div>
   );
-};
-
-export default Index;
+}
