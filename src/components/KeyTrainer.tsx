@@ -1,6 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
-import { MORSE_TABLE, textToMorse, MORSE_RU, MORSE_EN, MORSE_DIGITS } from '@/hooks/useMorse';
+import { MORSE_RU, MORSE_EN, MORSE_DIGITS } from '@/hooks/useMorse';
+
+const ALL_CHARS_RU = Object.keys(MORSE_RU);
+const ALL_CHARS_EN = Object.keys(MORSE_EN);
+const ALL_CHARS_DIG = Object.keys(MORSE_DIGITS);
 
 const MORSE_REVERSE_RU = Object.fromEntries(
   [...Object.entries(MORSE_RU), ...Object.entries(MORSE_DIGITS)].map(([k, v]) => [v, k])
@@ -9,39 +13,60 @@ const MORSE_REVERSE_EN = Object.fromEntries(
   [...Object.entries(MORSE_EN), ...Object.entries(MORSE_DIGITS)].map(([k, v]) => [v, k])
 );
 
-const SAMPLE_WORDS_RU = ['СОС', 'МИР', 'ДА', 'НЕТ', 'РАД', 'КОТ', 'ДОМ', 'СОН', 'БАЛ', 'КОД'];
-const SAMPLE_WORDS_EN = ['SOS', 'YES', 'NO', 'CAT', 'DOG', 'HOME', 'LOVE', 'STAR', 'SKY', 'KEY'];
-
-function getRandomWord(lang: 'ru' | 'en') {
-  const arr = lang === 'ru' ? SAMPLE_WORDS_RU : SAMPLE_WORDS_EN;
-  return arr[Math.floor(Math.random() * arr.length)];
+function generateGroups(count: number, lang: 'ru' | 'en'): string[] {
+  const pool = lang === 'ru'
+    ? [...ALL_CHARS_RU, ...ALL_CHARS_DIG]
+    : [...ALL_CHARS_EN, ...ALL_CHARS_DIG];
+  const groups: string[] = [];
+  for (let i = 0; i < count; i++) {
+    let g = '';
+    for (let j = 0; j < 5; j++) {
+      g += pool[Math.floor(Math.random() * pool.length)];
+    }
+    groups.push(g);
+  }
+  return groups;
 }
 
-interface KeySymbol {
-  type: '.' | '-';
-  id: number;
+function formatTime(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  if (m > 0) return `${m}м ${sec}с`;
+  return `${s}с`;
 }
+
+type CharResult = 'pending' | 'correct' | 'wrong';
 
 export default function KeyTrainer() {
   const [lang, setLang] = useState<'ru' | 'en'>('ru');
-  const [targetWord, setTargetWord] = useState(() => getRandomWord('ru'));
-  const [symbols, setSymbols] = useState<KeySymbol[]>([]);
-  const [currentLetterSymbols, setCurrentLetterSymbols] = useState<string[]>([]);
-  const [decodedLetters, setDecodedLetters] = useState<string[]>([]);
-  const [result, setResult] = useState<'correct' | 'wrong' | null>(null);
-  const [score, setScore] = useState({ correct: 0, total: 0 });
+  const [groupCount, setGroupCount] = useState(5);
+  const [groups, setGroups] = useState<string[]>(() => generateGroups(5, 'ru'));
+
+  // текущая позиция: какой символ печатаем
+  const [charIndex, setCharIndex] = useState(0);
+  const [charResults, setCharResults] = useState<CharResult[]>(() => Array(5 * 5).fill('pending'));
+
+  // состояние ключа
   const [isPressed, setIsPressed] = useState(false);
+  const [currentLetterSymbols, setCurrentLetterSymbols] = useState<string[]>([]);
   const [showHint, setShowHint] = useState(false);
-  const [freeMode, setFreeMode] = useState(false);
+
+  // таймер
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const pressStartRef = useRef<number>(0);
   const letterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wordTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
-  const symbolIdRef = useRef(0);
   const dotDuration = 120;
+
+  const totalChars = groups.join('').length;
+  const allChars = groups.join('');
 
   const getAudioCtx = () => {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed') {
@@ -76,28 +101,56 @@ export default function KeyTrainer() {
     }
   }, []);
 
-  const commitLetter = useCallback((syms: string[]) => {
+  const startTimer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    const t = Date.now();
+    setStartTime(t);
+    timerRef.current = setInterval(() => {
+      setElapsed(Date.now() - t);
+    }, 100);
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+  }, []);
+
+  const commitLetter = useCallback((syms: string[], currentIndex: number) => {
     if (syms.length === 0) return;
     const code = syms.join('');
     const reverseTable = lang === 'ru' ? MORSE_REVERSE_RU : MORSE_REVERSE_EN;
-    const letter = reverseTable[code] || '?';
-    setDecodedLetters(prev => [...prev, letter]);
-    setCurrentLetterSymbols([]);
-  }, [lang]);
+    const decoded = reverseTable[code] || '?';
+    const expected = allChars[currentIndex];
+    const isCorrect = decoded === expected;
 
-  const commitWord = useCallback(() => {
-    setDecodedLetters(prev => [...prev, ' ']);
+    setCharResults(prev => {
+      const next = [...prev];
+      next[currentIndex] = isCorrect ? 'correct' : 'wrong';
+      return next;
+    });
     setCurrentLetterSymbols([]);
-  }, []);
+
+    const nextIndex = currentIndex + 1;
+    setCharIndex(nextIndex);
+
+    if (nextIndex >= totalChars) {
+      stopTimer();
+      setFinished(true);
+    }
+  }, [lang, allChars, totalChars, stopTimer]);
 
   const handlePressStart = useCallback(() => {
-    if (result) return;
+    if (finished || charIndex >= totalChars) return;
     if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
-    if (wordTimerRef.current) clearTimeout(wordTimerRef.current);
     pressStartRef.current = Date.now();
     setIsPressed(true);
     startTone();
-  }, [result, startTone]);
+
+    // запускаем таймер при первом нажатии
+    if (startTime === null) {
+      startTimer();
+    }
+  }, [finished, charIndex, totalChars, startTone, startTime, startTimer]);
 
   const handlePressEnd = useCallback(() => {
     if (!isPressed) return;
@@ -106,21 +159,20 @@ export default function KeyTrainer() {
     stopTone();
 
     const sym: '.' | '-' = duration < dotDuration * 2.5 ? '.' : '-';
-    const id = ++symbolIdRef.current;
-    setSymbols(prev => [...prev, { type: sym, id }]);
+
     setCurrentLetterSymbols(prev => {
       const next = [...prev, sym];
       if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
+      // захватим charIndex через ref
       letterTimerRef.current = setTimeout(() => {
-        commitLetter(next);
-        if (wordTimerRef.current) clearTimeout(wordTimerRef.current);
-        wordTimerRef.current = setTimeout(() => {
-          commitWord();
-        }, dotDuration * 7);
+        setCharIndex(ci => {
+          commitLetter(next, ci);
+          return ci;
+        });
       }, dotDuration * 3);
       return next;
     });
-  }, [isPressed, stopTone, commitLetter, commitWord, dotDuration]);
+  }, [isPressed, stopTone, commitLetter]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -137,163 +189,153 @@ export default function KeyTrainer() {
     };
   }, [handlePressStart, handlePressEnd]);
 
-  const handleCheck = useCallback(() => {
-    if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
-    if (wordTimerRef.current) clearTimeout(wordTimerRef.current);
-    if (currentLetterSymbols.length > 0) {
-      commitLetter(currentLetterSymbols);
-    }
-    setTimeout(() => {
-      setDecodedLetters(prev => {
-        const typed = prev.join('').trim().replace(/\s+/g, ' ');
-        const correct = typed.toUpperCase() === targetWord.toUpperCase();
-        setResult(correct ? 'correct' : 'wrong');
-        setScore(s => ({ correct: s.correct + (correct ? 1 : 0), total: s.total + 1 }));
-        return prev;
-      });
-    }, 50);
-  }, [currentLetterSymbols, commitLetter, targetWord]);
-
-  const handleNext = () => {
-    setSymbols([]);
-    setCurrentLetterSymbols([]);
-    setDecodedLetters([]);
-    setResult(null);
-    setTargetWord(getRandomWord(lang));
-    if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
-    if (wordTimerRef.current) clearTimeout(wordTimerRef.current);
-  };
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
+    };
+  }, []);
 
   const handleReset = () => {
-    setSymbols([]);
-    setCurrentLetterSymbols([]);
-    setDecodedLetters([]);
-    setResult(null);
     if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
-    if (wordTimerRef.current) clearTimeout(wordTimerRef.current);
+    stopTimer();
+    const g = generateGroups(groupCount, lang);
+    setGroups(g);
+    setCharIndex(0);
+    setCharResults(Array(groupCount * 5).fill('pending'));
+    setCurrentLetterSymbols([]);
+    setIsPressed(false);
+    setStartTime(null);
+    setElapsed(0);
+    setFinished(false);
+    stopTone();
   };
 
   const handleLangChange = (l: 'ru' | 'en') => {
     setLang(l);
-    setTargetWord(getRandomWord(l));
     handleReset();
+    const g = generateGroups(groupCount, l);
+    setGroups(g);
+    setCharResults(Array(groupCount * 5).fill('pending'));
   };
 
-  const targetMorse = textToMorse(targetWord);
-  const typedText = decodedLetters.join('').replace(/\s+$/, '');
+  const handleGroupCountChange = (n: number) => {
+    const clamped = Math.max(1, Math.min(10, n));
+    setGroupCount(clamped);
+    if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
+    stopTimer();
+    const g = generateGroups(clamped, lang);
+    setGroups(g);
+    setCharIndex(0);
+    setCharResults(Array(clamped * 5).fill('pending'));
+    setCurrentLetterSymbols([]);
+    setStartTime(null);
+    setElapsed(0);
+    setFinished(false);
+  };
+
+  const correctCount = charResults.filter(r => r === 'correct').length;
+  const wrongCount = charResults.filter(r => r === 'wrong').length;
   const currentCode = currentLetterSymbols.join('');
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex flex-wrap items-center gap-3 mb-2">
+
+      {/* Панель настроек */}
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 bg-secondary p-1 rounded-xl">
           <button
-            onClick={() => setFreeMode(false)}
+            onClick={() => handleLangChange('ru')}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              !freeMode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              lang === 'ru' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
-          >
-            <Icon name="Target" size={13} className="inline mr-1.5" />
-            По слову
-          </button>
+          >Рус</button>
           <button
-            onClick={() => setFreeMode(true)}
+            onClick={() => handleLangChange('en')}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              freeMode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+              lang === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
-          >
-            <Icon name="Wind" size={13} className="inline mr-1.5" />
-            Свободно
-          </button>
+          >Eng</button>
         </div>
-        {!freeMode && (
-          <div className="flex gap-1 bg-secondary p-1 rounded-xl">
-            <button
-              onClick={() => handleLangChange('ru')}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                lang === 'ru' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >Рус</button>
-            <button
-              onClick={() => handleLangChange('en')}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                lang === 'en' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >Eng</button>
-          </div>
-        )}
+
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground uppercase tracking-wider">Групп:</span>
+          <button onClick={() => handleGroupCountChange(groupCount - 1)} className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center">−</button>
+          <span className="w-6 text-center text-sm font-mono font-semibold text-primary">{groupCount}</span>
+          <button onClick={() => handleGroupCountChange(groupCount + 1)} className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center">+</button>
+        </div>
+
+        <button
+          onClick={handleReset}
+          className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border hover:border-primary/40 px-3 py-1.5 rounded-lg transition-all"
+        >
+          <Icon name="RotateCcw" size={12} />
+          Новое задание
+        </button>
       </div>
 
-      {!freeMode && (
-        <div className="card-morse border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Передайте слово</div>
-              <div className="text-4xl font-black text-foreground tracking-widest mb-2">{targetWord}</div>
-              {showHint && (
-                <div className="font-mono text-primary tracking-widest text-sm animate-fade-in">{targetMorse}</div>
-              )}
+      {/* Задание: группы символов */}
+      <div className="card-morse border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-xs text-muted-foreground uppercase tracking-wider">Передайте слово</div>
+          <div className="flex items-center gap-3">
+            {/* таймер */}
+            <div className={`font-mono text-sm font-semibold ${finished ? 'text-emerald-400' : startTime ? 'text-primary' : 'text-muted-foreground'}`}>
+              <Icon name="Timer" size={13} className="inline mr-1" />
+              {formatTime(elapsed)}
             </div>
             <button
               onClick={() => setShowHint(h => !h)}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all shrink-0 mt-1 ${
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${
                 showHint ? 'border-primary/40 text-primary bg-primary/10' : 'border-border text-muted-foreground hover:border-primary/40'
               }`}
             >
               <Icon name={showHint ? 'EyeOff' : 'Eye'} size={12} />
-              {showHint ? 'Скрыть код' : 'Показать код'}
+              {showHint ? 'Скрыть' : 'Код'}
             </button>
           </div>
         </div>
-      )}
 
-      <div className="card-morse">
-        <div className="text-xs text-muted-foreground mb-3 uppercase tracking-wider">Принятые символы</div>
-        <div className="min-h-10 flex flex-wrap items-center gap-x-3 gap-y-2 mb-2">
-          {symbols.length === 0 && currentLetterSymbols.length === 0 ? (
-            <span className="text-muted-foreground text-sm italic">нажмите ключ для начала передачи...</span>
-          ) : (
-            <>
-              {symbols.map(s => (
-                <span
-                  key={s.id}
-                  className={`inline-block rounded-full bg-primary/40 ${
-                    s.type === '.' ? 'w-2.5 h-2.5' : 'w-7 h-2.5'
-                  }`}
-                />
-              ))}
-              {currentLetterSymbols.map((s, i) => (
-                <span
-                  key={`cur-${i}`}
-                  className={`inline-block rounded-full bg-primary ${
-                    s === '.' ? 'w-2.5 h-2.5' : 'w-7 h-2.5'
-                  } animate-pulse`}
-                />
-              ))}
-            </>
-          )}
+        <div className="flex flex-wrap gap-3">
+          {groups.map((group, gi) => {
+            const groupStartIndex = gi * 5;
+            return (
+              <div key={gi} className="flex gap-1">
+                {group.split('').map((char, ci) => {
+                  const absIndex = groupStartIndex + ci;
+                  const res = charResults[absIndex];
+                  const isCurrent = absIndex === charIndex;
+                  return (
+                    <div key={ci} className="flex flex-col items-center gap-0.5">
+                      <span className={`text-2xl font-black transition-colors ${
+                        res === 'correct' ? 'text-emerald-400' :
+                        res === 'wrong' ? 'text-red-400' :
+                        isCurrent ? 'text-primary' :
+                        absIndex < charIndex ? 'text-muted-foreground/40' :
+                        'text-foreground'
+                      }`}>
+                        {char}
+                      </span>
+                      {showHint && (
+                        <span className="font-mono text-[10px] text-muted-foreground tracking-widest">
+                          {(lang === 'ru' ? MORSE_RU : MORSE_EN)[char] || MORSE_DIGITS[char] || ''}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
 
-        <div className="h-px bg-border my-3" />
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-baseline gap-2">
-            <span className="font-mono text-2xl font-bold text-foreground tracking-widest">
-              {typedText || <span className="text-muted-foreground text-base font-normal">—</span>}
-            </span>
-            {currentCode && (
-              <span className="font-mono text-primary text-lg tracking-widest opacity-60">[{currentCode}]</span>
-            )}
-          </div>
-          {(symbols.length > 0 || decodedLetters.length > 0) && !result && (
-            <button onClick={handleReset} className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1">
-              <Icon name="RotateCcw" size={12} />
-              Сброс
-            </button>
-          )}
-        </div>
+        {/* текущий код в процессе набора */}
+        {currentCode && (
+          <div className="mt-2 font-mono text-primary text-sm tracking-widest opacity-70">[{currentCode}]</div>
+        )}
       </div>
 
+      {/* Ключ */}
       <div className="flex flex-col items-center gap-4">
         <div
           onMouseDown={handlePressStart}
@@ -302,7 +344,7 @@ export default function KeyTrainer() {
           onTouchStart={e => { e.preventDefault(); handlePressStart(); }}
           onTouchEnd={e => { e.preventDefault(); handlePressEnd(); }}
           className={`relative select-none cursor-pointer transition-all duration-75 ${
-            result ? 'opacity-40 pointer-events-none' : ''
+            finished ? 'opacity-40 pointer-events-none' : ''
           }`}
         >
           <div className={`w-40 h-40 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-75 ${
@@ -332,46 +374,32 @@ export default function KeyTrainer() {
         </div>
       </div>
 
-      {!freeMode && result === null && decodedLetters.length > 0 && !isPressed && (
-        <div className="flex justify-center">
-          <button onClick={handleCheck} className="btn-primary flex items-center gap-2">
-            <Icon name="CheckCircle2" size={17} />
-            Проверить
-          </button>
-        </div>
-      )}
-
-      {!freeMode && result && (
-        <div className={`rounded-xl p-5 border text-center animate-scale-in ${
-          result === 'correct'
-            ? 'bg-emerald-500/10 border-emerald-500/30'
-            : 'bg-red-500/10 border-red-500/30'
-        }`}>
-          <div className={`text-3xl font-black mb-2 ${result === 'correct' ? 'text-emerald-400' : 'text-red-400'}`}>
-            {result === 'correct' ? '✓ Отлично!' : '✗ Ошибка'}
+      {/* Результат */}
+      {finished && (
+        <div className="rounded-xl p-5 border border-primary/30 bg-primary/5 text-center animate-fade-in">
+          <div className="text-3xl font-black text-primary mb-1">Готово!</div>
+          <div className="text-sm text-muted-foreground mb-4">
+            Время: <span className="font-mono font-bold text-foreground">{formatTime(elapsed)}</span>
+            <span className="mx-2">·</span>
+            <span className="text-emerald-400 font-semibold">{correctCount} верно</span>
+            {wrongCount > 0 && <><span className="mx-1">·</span><span className="text-red-400 font-semibold">{wrongCount} ошибок</span></>}
           </div>
-          {result === 'wrong' && (
-            <div className="text-sm text-muted-foreground mb-3">
-              Вы передали: <span className="font-mono font-bold text-foreground">{typedText}</span>
-              <br />
-              Нужно было: <span className="font-mono font-bold text-primary">{targetWord}</span>
-            </div>
-          )}
-          <button onClick={handleNext} className="btn-primary">
-            Следующее слово
+          <button onClick={handleReset} className="btn-primary">
+            Новое задание
           </button>
         </div>
       )}
 
-      {!freeMode && (
+      {/* Счётчики */}
+      {!finished && startTime && (
         <div className="grid grid-cols-2 gap-4">
           <div className="card-morse text-center">
-            <div className="text-3xl font-black text-primary">{score.correct}</div>
-            <div className="text-sm text-muted-foreground">Верных передач</div>
+            <div className="text-3xl font-black text-emerald-400">{correctCount}</div>
+            <div className="text-sm text-muted-foreground">Верно</div>
           </div>
           <div className="card-morse text-center">
-            <div className="text-3xl font-black text-foreground">{score.total}</div>
-            <div className="text-sm text-muted-foreground">Всего попыток</div>
+            <div className="text-3xl font-black text-red-400">{wrongCount}</div>
+            <div className="text-sm text-muted-foreground">Ошибок</div>
           </div>
         </div>
       )}
