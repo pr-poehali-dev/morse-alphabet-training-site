@@ -33,24 +33,13 @@ function formatTime(ms: number): string {
 }
 
 type CharResult = 'pending' | 'correct' | 'wrong';
-type InputMode = 'screen' | 'mic';
-// straight — нормально разомкнут (нажатие = сигнал)
-// inverted — нормально замкнут (отпускание = сигнал, для ключей типа "телеграфный ключ с замыканием")
-type KeyPolarity = 'straight' | 'inverted';
 
 export default function KeyTrainer() {
   const [lang, setLang] = useState<'ru' | 'en'>('ru');
   const [groupCount, setGroupCount] = useState(5);
   const [groups, setGroups] = useState<string[]>(() => generateGroups(5, 'ru'));
   const [showSettings, setShowSettings] = useState(false);
-
-  // ввод
-  const [inputMode, setInputMode] = useState<InputMode>('screen');
-  const [keyPolarity, setKeyPolarity] = useState<KeyPolarity>('straight');
-  const [micThreshold, setMicThreshold] = useState(20); // 0-100
-  const [micActive, setMicActive] = useState(false);
-  const [micError, setMicError] = useState('');
-  const [dotDuration, setDotDuration] = useState(120); // мс — длительность точки
+  const [dotDuration, setDotDuration] = useState(120);
 
   const [charIndex, setCharIndex] = useState(0);
   const [charResults, setCharResults] = useState<CharResult[]>(() => Array(5 * 5).fill('pending'));
@@ -65,23 +54,13 @@ export default function KeyTrainer() {
 
   const pressStartRef = useRef<number>(0);
   const letterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // audio — тон при нажатии
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
 
-  // mic
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const micAnalyserRef = useRef<AnalyserNode | null>(null);
-  const micRafRef = useRef<number | null>(null);
-  const micAudioCtxRef = useRef<AudioContext | null>(null);
-  const micPressedRef = useRef(false);
-
   const totalChars = groups.join('').length;
   const allChars = groups.join('');
 
-  // ─── Audio tone ───────────────────────────────────────────────
   const getAudioCtx = () => {
     if (!audioCtxRef.current || audioCtxRef.current.state === 'closed')
       audioCtxRef.current = new AudioContext();
@@ -110,7 +89,6 @@ export default function KeyTrainer() {
     }
   }, []);
 
-  // ─── Timer ────────────────────────────────────────────────────
   const startTimer = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     const t = Date.now();
@@ -123,7 +101,6 @@ export default function KeyTrainer() {
     timerRef.current = null;
   }, []);
 
-  // ─── Commit letter ────────────────────────────────────────────
   const commitLetter = useCallback((syms: string[], currentIndex: number) => {
     if (syms.length === 0) return;
     const code = syms.join('');
@@ -141,7 +118,6 @@ export default function KeyTrainer() {
     if (next >= totalChars) { stopTimer(); setFinished(true); }
   }, [lang, allChars, totalChars, stopTimer]);
 
-  // ─── Press handlers (экранный/клавиатурный ключ) ──────────────
   const handlePressStart = useCallback(() => {
     if (finished || charIndex >= totalChars) return;
     if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
@@ -167,9 +143,7 @@ export default function KeyTrainer() {
     });
   }, [isPressed, stopTone, commitLetter, dotDuration]);
 
-  // ─── Keyboard ─────────────────────────────────────────────────
   useEffect(() => {
-    if (inputMode !== 'screen') return;
     const onDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !e.repeat) { e.preventDefault(); handlePressStart(); }
     };
@@ -179,85 +153,15 @@ export default function KeyTrainer() {
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
     return () => { window.removeEventListener('keydown', onDown); window.removeEventListener('keyup', onUp); };
-  }, [inputMode, handlePressStart, handlePressEnd]);
-
-  // ─── Microphone input ─────────────────────────────────────────
-  const stopMic = useCallback(() => {
-    if (micRafRef.current) cancelAnimationFrame(micRafRef.current);
-    micRafRef.current = null;
-    micStreamRef.current?.getTracks().forEach(t => t.stop());
-    micStreamRef.current = null;
-    micAnalyserRef.current = null;
-    if (micAudioCtxRef.current) {
-      micAudioCtxRef.current.close();
-      micAudioCtxRef.current = null;
-    }
-    setMicActive(false);
-    micPressedRef.current = false;
-  }, []);
-
-  const startMic = useCallback(async () => {
-    setMicError('');
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-      const ctx = new AudioContext();
-      micAudioCtxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      micAnalyserRef.current = analyser;
-      setMicActive(true);
-    } catch {
-      setMicError('Нет доступа к микрофону. Разрешите доступ в браузере.');
-    }
-  }, []);
-
-  // RAF loop для микрофона
-  useEffect(() => {
-    if (!micActive || !micAnalyserRef.current) return;
-
-    const data = new Uint8Array(micAnalyserRef.current.frequencyBinCount);
-    let rafId: number;
-
-    const tick = () => {
-      rafId = requestAnimationFrame(tick);
-      micAnalyserRef.current!.getByteFrequencyData(data);
-      const avg = data.reduce((a, b) => a + b, 0) / data.length;
-      const level = (avg / 255) * 100;
-
-      const isStraight = keyPolarity === 'straight';
-      const signalActive = isStraight ? level >= micThreshold : level < micThreshold;
-
-      if (signalActive && !micPressedRef.current) {
-        micPressedRef.current = true;
-        handlePressStart();
-      } else if (!signalActive && micPressedRef.current) {
-        micPressedRef.current = false;
-        handlePressEnd();
-      }
-    };
-
-    rafId = requestAnimationFrame(tick);
-    micRafRef.current = rafId;
-    return () => cancelAnimationFrame(rafId);
-  }, [micActive, micThreshold, keyPolarity, handlePressStart, handlePressEnd]);
-
-  // при смене режима ввода — стоп мик
-  useEffect(() => {
-    if (inputMode !== 'mic') stopMic();
-  }, [inputMode, stopMic]);
+  }, [handlePressStart, handlePressEnd]);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
-      stopMic();
     };
-  }, [stopMic]);
+  }, []);
 
-  // ─── Reset / Lang / Group ─────────────────────────────────────
   const handleReset = useCallback(() => {
     if (letterTimerRef.current) clearTimeout(letterTimerRef.current);
     stopTimer(); stopTone();
@@ -269,7 +173,6 @@ export default function KeyTrainer() {
     setStartTime(null);
     setElapsed(0);
     setFinished(false);
-    micPressedRef.current = false;
   }, [groupCount, lang, stopTimer, stopTone]);
 
   const handleLangChange = (l: 'ru' | 'en') => {
@@ -285,7 +188,6 @@ export default function KeyTrainer() {
     setStartTime(null);
     setElapsed(0);
     setFinished(false);
-    micPressedRef.current = false;
   };
 
   const handleGroupCountChange = (n: number) => {
@@ -301,10 +203,8 @@ export default function KeyTrainer() {
     setStartTime(null);
     setElapsed(0);
     setFinished(false);
-    micPressedRef.current = false;
   };
 
-  // ─── Derived ──────────────────────────────────────────────────
   const correctCount = charResults.filter(r => r === 'correct').length;
   const wrongCount = charResults.filter(r => r === 'wrong').length;
   const currentCode = currentLetterSymbols.join('');
@@ -313,7 +213,7 @@ export default function KeyTrainer() {
   return (
     <div className="space-y-4 animate-fade-in">
 
-      {/* ── Верхняя панель ── */}
+      {/* Верхняя панель */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 bg-secondary p-1 rounded-xl">
           {(['ru', 'en'] as const).map(l => (
@@ -345,67 +245,10 @@ export default function KeyTrainer() {
         </div>
       </div>
 
-      {/* ── Настройки ── */}
+      {/* Настройки */}
       {showSettings && (
         <div className="card-morse border-border/60 space-y-4 animate-fade-in">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Настройки ключа</div>
-
-          {/* Источник ввода */}
-          <div>
-            <div className="text-sm text-foreground font-medium mb-2">Источник сигнала</div>
-            <div className="flex gap-2 flex-wrap">
-              <button onClick={() => setInputMode('screen')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${inputMode === 'screen' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                <Icon name="Mouse" size={14} />
-                Экран / Пробел
-              </button>
-              <button onClick={() => { setInputMode('mic'); if (!micActive) startMic(); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${inputMode === 'mic' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                <Icon name="Mic" size={14} />
-                Ключ в микрофонный вход
-                {micActive && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
-              </button>
-            </div>
-            {micError && <div className="mt-2 text-xs text-red-400 flex items-center gap-1.5"><Icon name="AlertCircle" size={12} />{micError}</div>}
-          </div>
-
-          {/* Тип ключа */}
-          {inputMode === 'mic' && (
-            <div>
-              <div className="text-sm text-foreground font-medium mb-2">Тип ключа</div>
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => setKeyPolarity('straight')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${keyPolarity === 'straight' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                  <Icon name="Radio" size={14} />
-                  Прямой (нажатие = сигнал)
-                </button>
-                <button onClick={() => setKeyPolarity('inverted')}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${keyPolarity === 'inverted' ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
-                  <Icon name="RadioReceiver" size={14} />
-                  Инверсный (замыкание = тишина)
-                </button>
-              </div>
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                Прямой — ключ типа «телеграфный» (при нажатии звук/сигнал). Инверсный — нормально замкнутый контакт (сигнал при разомкнутом состоянии).
-              </p>
-            </div>
-          )}
-
-          {/* Порог микрофона */}
-          {inputMode === 'mic' && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-sm text-foreground font-medium">Порог срабатывания</div>
-                <span className="font-mono text-xs text-primary">{micThreshold}%</span>
-              </div>
-              <input type="range" min={1} max={80} value={micThreshold}
-                onChange={e => setMicThreshold(Number(e.target.value))}
-                className="w-full accent-[hsl(var(--primary))]" />
-              <p className="mt-1 text-xs text-muted-foreground">Уровень громкости, выше которого ключ считается нажатым. При шумном окружении — поднимите порог.</p>
-            </div>
-          )}
-
-          {/* Скорость (длина точки) */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <div className="text-sm text-foreground font-medium">Длительность точки</div>
@@ -415,13 +258,13 @@ export default function KeyTrainer() {
               onChange={e => setDotDuration(Number(e.target.value))}
               className="w-full accent-[hsl(var(--primary))]" />
             <p className="mt-1 text-xs text-muted-foreground">
-              Короткое нажатие менее {Math.round(dotDuration * 2.5)} мс = точка, длиннее = тире. Рекомендовано: 80–150 мс.
+              Нажатие менее {Math.round(dotDuration * 2.5)} мс = точка, длиннее = тире. Рекомендовано: 80–150 мс.
             </p>
           </div>
         </div>
       )}
 
-      {/* ── Задание ── */}
+      {/* Задание */}
       <div className="card-morse border-primary/20 bg-gradient-to-r from-primary/5 to-transparent">
         <div className="flex items-center justify-between mb-3">
           <div className="text-xs text-muted-foreground uppercase tracking-wider">Передайте слово</div>
@@ -473,68 +316,35 @@ export default function KeyTrainer() {
         )}
       </div>
 
-      {/* ── Ключ (экранный) ── */}
-      {inputMode === 'screen' && (
-        <div className="flex flex-col items-center gap-4">
-          <div
-            onMouseDown={handlePressStart} onMouseUp={handlePressEnd}
-            onMouseLeave={() => isPressed && handlePressEnd()}
-            onTouchStart={e => { e.preventDefault(); handlePressStart(); }}
-            onTouchEnd={e => { e.preventDefault(); handlePressEnd(); }}
-            className={`relative select-none cursor-pointer transition-all duration-75 ${finished ? 'opacity-40 pointer-events-none' : ''}`}
-          >
-            <div className={`w-40 h-40 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-75 ${
-              isPressed
-                ? 'border-primary bg-primary/20 scale-95 shadow-[0_0_40px_hsl(var(--amber)/0.4)]'
-                : 'border-border bg-secondary hover:border-primary/50 hover:bg-primary/5 hover:shadow-[0_0_20px_hsl(var(--amber)/0.15)]'
-            }`}>
-              <div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center transition-all ${isPressed ? 'border-primary bg-primary/30' : 'border-border bg-muted'}`}>
-                <div className={`w-4 h-4 rounded-full transition-all ${isPressed ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
-              </div>
-              <div className={`mt-3 text-xs font-semibold transition-colors ${isPressed ? 'text-primary' : 'text-muted-foreground'}`}>
-                {isPressed ? 'ПЕРЕДАЧА' : 'КЛЮЧ'}
-              </div>
+      {/* Экранный ключ */}
+      <div className="flex flex-col items-center gap-4">
+        <div
+          onMouseDown={handlePressStart} onMouseUp={handlePressEnd}
+          onMouseLeave={() => isPressed && handlePressEnd()}
+          onTouchStart={e => { e.preventDefault(); handlePressStart(); }}
+          onTouchEnd={e => { e.preventDefault(); handlePressEnd(); }}
+          className={`relative select-none cursor-pointer transition-all duration-75 ${finished ? 'opacity-40 pointer-events-none' : ''}`}
+        >
+          <div className={`w-40 h-40 rounded-full border-4 flex flex-col items-center justify-center transition-all duration-75 ${
+            isPressed
+              ? 'border-primary bg-primary/20 scale-95 shadow-[0_0_40px_hsl(var(--amber)/0.4)]'
+              : 'border-border bg-secondary hover:border-primary/50 hover:bg-primary/5 hover:shadow-[0_0_20px_hsl(var(--amber)/0.15)]'
+          }`}>
+            <div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center transition-all ${isPressed ? 'border-primary bg-primary/30' : 'border-border bg-muted'}`}>
+              <div className={`w-4 h-4 rounded-full transition-all ${isPressed ? 'bg-primary' : 'bg-muted-foreground/40'}`} />
+            </div>
+            <div className={`mt-3 text-xs font-semibold transition-colors ${isPressed ? 'text-primary' : 'text-muted-foreground'}`}>
+              {isPressed ? 'ПЕРЕДАЧА' : 'КЛЮЧ'}
             </div>
           </div>
-          <div className="text-center text-xs text-muted-foreground">
-            Кликните / тачскрин или <kbd className="px-1.5 py-0.5 rounded bg-secondary border border-border font-mono text-xs">Пробел</kbd>
-            <span className="mx-1.5">·</span>Короткое = точка, длинное = тире
-          </div>
         </div>
-      )}
-
-      {/* ── Статус микрофонного ввода ── */}
-      {inputMode === 'mic' && (
-        <div className={`rounded-xl p-5 border text-center ${micActive ? 'border-primary/30 bg-primary/5' : 'border-border bg-secondary/50'}`}>
-          {micActive ? (
-            <>
-              <div className="flex items-center justify-center gap-3 mb-2">
-                <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-sm font-semibold text-foreground">Микрофон активен</span>
-                {isPressed && <span className="text-primary font-bold text-xs animate-pulse">● СИГНАЛ</span>}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Подключите ключ к микрофонному гнезду и нажимайте. Порог: {micThreshold}%
-              </p>
-              <button onClick={stopMic} className="mt-3 text-xs text-muted-foreground hover:text-foreground border border-border px-3 py-1.5 rounded-lg">
-                Отключить микрофон
-              </button>
-            </>
-          ) : (
-            <>
-              <Icon name="Mic" size={28} className="text-muted-foreground mx-auto mb-2" />
-              <p className="text-sm text-muted-foreground mb-3">Разрешите доступ к микрофону для использования физического ключа</p>
-              <button onClick={startMic} className="btn-primary text-sm">
-                <Icon name="Mic" size={14} className="inline mr-1.5" />
-                Подключить микрофон
-              </button>
-              {micError && <p className="mt-2 text-xs text-red-400">{micError}</p>}
-            </>
-          )}
+        <div className="text-center text-xs text-muted-foreground">
+          Кликните / тачскрин или <kbd className="px-1.5 py-0.5 rounded bg-secondary border border-border font-mono text-xs">Пробел</kbd>
+          <span className="mx-1.5">·</span>Короткое = точка, длинное = тире
         </div>
-      )}
+      </div>
 
-      {/* ── Результат ── */}
+      {/* Результат */}
       {finished && (
         <div className="rounded-xl p-5 border border-primary/30 bg-primary/5 text-center animate-fade-in">
           <div className="text-3xl font-black text-primary mb-3">Готово!</div>
@@ -560,7 +370,7 @@ export default function KeyTrainer() {
         </div>
       )}
 
-      {/* ── Счётчики в процессе ── */}
+      {/* Счётчики в процессе */}
       {!finished && startTime && (
         <div className="grid grid-cols-2 gap-4">
           <div className="card-morse text-center">

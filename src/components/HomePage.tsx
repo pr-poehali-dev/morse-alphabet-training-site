@@ -1,6 +1,6 @@
 import Icon from '@/components/ui/icon';
 
-type Page = 'home' | 'trainer' | 'table';
+type Page = 'home' | 'trainer' | 'table' | 'decoder';
 
 interface HomePageProps {
   onNavigate: (page: Page) => void;
@@ -15,16 +15,20 @@ const FEATURES = [
     color: 'from-amber-500/20 to-amber-600/5',
   },
   {
+    icon: 'Mic',
+    title: 'Декодер',
+    desc: 'Автоматическое декодирование сигнала Морзе через микрофон',
+    page: 'decoder' as Page,
+    color: 'from-violet-500/20 to-violet-600/5',
+  },
+  {
     icon: 'Table2',
     title: 'Таблица',
     desc: 'Полная таблица кодов для русского и латинского алфавита',
     page: 'table' as Page,
     color: 'from-emerald-500/20 to-emerald-600/5',
   },
-
 ];
-
-
 
 export default function HomePage({ onNavigate }: HomePageProps) {
   return (
@@ -49,7 +53,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
 
           <p className="text-lg text-muted-foreground max-w-xl mx-auto mb-8 leading-relaxed">
             Интерактивный тренажёр для изучения русского и латинского алфавита.
-            Слушайте сигналы, тренируйтесь и отслеживайте свой прогресс.
+            Слушайте сигналы, тренируйтесь и декодируйте через микрофон.
           </p>
 
           <div className="flex items-center justify-center gap-3 flex-wrap">
@@ -60,6 +64,13 @@ export default function HomePage({ onNavigate }: HomePageProps) {
               <Icon name="Zap" size={17} />
               Открыть тренажёр
             </button>
+            <button
+              onClick={() => onNavigate('decoder')}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border hover:border-primary/40 text-foreground font-semibold transition-all hover:bg-secondary"
+            >
+              <Icon name="Mic" size={17} />
+              Декодер
+            </button>
           </div>
         </div>
       </section>
@@ -67,7 +78,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
       <section className="mb-14">
         <h2 className="section-title mb-2">Разделы сайта</h2>
         <p className="text-muted-foreground mb-6">Выберите, с чего хотите начать</p>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {FEATURES.map(f => (
             <button
               key={f.page}

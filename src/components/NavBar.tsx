@@ -1,6 +1,6 @@
 import Icon from '@/components/ui/icon';
 
-type Page = 'home' | 'trainer' | 'table';
+type Page = 'home' | 'trainer' | 'table' | 'decoder';
 
 interface NavBarProps {
   current: Page;
@@ -10,6 +10,7 @@ interface NavBarProps {
 const NAV_ITEMS: { id: Page; label: string; icon: string }[] = [
   { id: 'home', label: 'Главная', icon: 'Home' },
   { id: 'trainer', label: 'Тренажёр', icon: 'Zap' },
+  { id: 'decoder', label: 'Декодер', icon: 'Mic' },
   { id: 'table', label: 'Таблица', icon: 'Table2' },
 ];
 
