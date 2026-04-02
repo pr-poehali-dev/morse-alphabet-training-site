@@ -1,6 +1,6 @@
 import Icon from '@/components/ui/icon';
 
-type Page = 'home' | 'trainer' | 'stats' | 'table';
+type Page = 'home' | 'trainer' | 'table';
 
 interface HomePageProps {
   onNavigate: (page: Page) => void;
@@ -21,13 +21,7 @@ const FEATURES = [
     page: 'table' as Page,
     color: 'from-emerald-500/20 to-emerald-600/5',
   },
-  {
-    icon: 'BarChart3',
-    title: 'Статистика',
-    desc: 'Отслеживайте прогресс и улучшайте результаты',
-    page: 'stats' as Page,
-    color: 'from-violet-500/20 to-violet-600/5',
-  },
+
 ];
 
 
