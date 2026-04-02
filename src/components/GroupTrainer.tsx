@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import Icon from '@/components/ui/icon';
 import { useMorse, textToMorse, MORSE_RU, MORSE_EN, MORSE_DIGITS } from '@/hooks/useMorse';
 
@@ -10,8 +10,6 @@ type CharSet = 'ru' | 'en' | 'digits' | 'mixed';
 
 interface Group {
   text: string;
-  userInput: string;
-  status: 'pending' | 'correct' | 'wrong';
 }
 
 function generateGroup(charSet: CharSet): string {
@@ -27,8 +25,6 @@ function generateGroup(charSet: CharSet): string {
 function generateGroups(count: number, charSet: CharSet): Group[] {
   return Array.from({ length: count }, () => ({
     text: generateGroup(charSet),
-    userInput: '',
-    status: 'pending' as const,
   }));
 }
 
@@ -39,14 +35,10 @@ export default function GroupTrainer() {
   const [groups, setGroups] = useState<Group[]>(() => generateGroups(5, 'ru'));
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeGroup, setActiveGroup] = useState<number | null>(null);
-  const [checked, setChecked] = useState(false);
-  const [score, setScore] = useState({ correct: 0, total: 0 });
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const { playMorse, stop } = useMorse();
 
   const handleGenerate = useCallback(() => {
     setGroups(generateGroups(groupCount, charSet));
-    setChecked(false);
     setActiveGroup(null);
   }, [groupCount, charSet]);
 
@@ -73,7 +65,6 @@ export default function GroupTrainer() {
 
     setIsPlaying(false);
     setActiveGroup(null);
-    setTimeout(() => inputRefs.current[0]?.focus(), 100);
   }, [isPlaying, groups, wpm, playMorse, stop]);
 
   const handlePlayGroup = useCallback(async (idx: number) => {
@@ -86,39 +77,10 @@ export default function GroupTrainer() {
     setIsPlaying(false);
   }, [isPlaying, groups, wpm, playMorse]);
 
-  const handleInput = (idx: number, value: string) => {
-    setGroups(prev => prev.map((g, i) => i === idx ? { ...g, userInput: value.toUpperCase() } : g));
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent, idx: number) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const next = inputRefs.current[idx + 1];
-      if (next) next.focus();
-      else handleCheck();
-    }
-  };
-
-  const handleCheck = useCallback(() => {
-    let correct = 0;
-    const updated = groups.map(g => {
-      const isCorrect = g.userInput.trim().toUpperCase() === g.text.toUpperCase();
-      if (isCorrect) correct++;
-      return { ...g, status: (isCorrect ? 'correct' : 'wrong') as Group['status'] };
-    });
-    setGroups(updated);
-    setChecked(true);
-    setScore(s => ({ correct: s.correct + correct, total: s.total + groups.length }));
-  }, [groups]);
-
   const handleNext = () => {
-    const newGroups = generateGroups(groupCount, charSet);
-    setGroups(newGroups);
-    setChecked(false);
+    setGroups(generateGroups(groupCount, charSet));
     setActiveGroup(null);
   };
-
-  const correctCount = groups.filter(g => g.status === 'correct').length;
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -148,12 +110,12 @@ export default function GroupTrainer() {
             <div className="text-xs text-muted-foreground mb-1.5 uppercase tracking-wider">Групп</div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => { const n = Math.max(1, groupCount - 1); setGroupCount(n); setGroups(generateGroups(n, charSet)); setChecked(false); }}
+                onClick={() => { const n = Math.max(1, groupCount - 1); setGroupCount(n); setGroups(generateGroups(n, charSet)); }}
                 className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center"
               >−</button>
               <span className="w-8 text-center text-sm font-mono font-semibold text-primary">{groupCount}</span>
               <button
-                onClick={() => { const n = Math.min(20, groupCount + 1); setGroupCount(n); setGroups(generateGroups(n, charSet)); setChecked(false); }}
+                onClick={() => { const n = Math.min(20, groupCount + 1); setGroupCount(n); setGroups(generateGroups(n, charSet)); }}
                 className="w-7 h-7 rounded-lg bg-secondary text-foreground font-bold text-sm flex items-center justify-center"
               >+</button>
             </div>
@@ -183,7 +145,7 @@ export default function GroupTrainer() {
       {/* Воспроизведение */}
       <div className="card-morse text-center">
         <p className="text-sm text-muted-foreground mb-4">
-          Прослушайте группы и впишите принятые символы. Каждая группа — 5 знаков.
+          Прослушайте группы. Каждая группа — 5 знаков.
         </p>
 
         <div className="flex flex-wrap justify-center gap-2 mb-5">
@@ -193,16 +155,12 @@ export default function GroupTrainer() {
               className={`flex items-center justify-center w-10 h-10 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
                 activeGroup === i
                   ? 'bg-primary border-primary text-primary-foreground scale-110 shadow-[0_0_16px_hsl(var(--amber)/0.5)]'
-                  : checked && g.status === 'correct'
-                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
-                  : checked && g.status === 'wrong'
-                  ? 'bg-red-500/15 border-red-500/40 text-red-400'
-                  : 'bg-secondary border-border text-muted-foreground'
+                  : 'bg-secondary border-border text-muted-foreground hover:border-primary/40'
               }`}
-              onClick={() => !isPlaying && !checked && handlePlayGroup(i)}
-              title={checked ? g.text : `Группа ${i + 1}`}
+              onClick={() => !isPlaying && handlePlayGroup(i)}
+              title={`Группа ${i + 1}`}
             >
-              {checked ? (g.status === 'correct' ? '✓' : '✗') : i + 1}
+              {i + 1}
             </div>
           ))}
         </div>
@@ -216,54 +174,19 @@ export default function GroupTrainer() {
         </button>
       </div>
 
-      {/* Ввод */}
+      {/* Проверка */}
       <div className="card-morse">
-        <div className="text-xs text-muted-foreground mb-3 uppercase tracking-wider">Введите принятые группы</div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        <div className="text-xs text-muted-foreground mb-3 uppercase tracking-wider">Правильный приём</div>
+        <div className="flex flex-wrap gap-3 font-mono text-xl font-bold tracking-widest">
           {groups.map((g, i) => (
-            <div key={i} className="flex flex-col gap-1">
-              <div className="text-xs text-muted-foreground text-center">Группа {i + 1}</div>
-              <input
-                ref={el => { inputRefs.current[i] = el; }}
-                type="text"
-                maxLength={5}
-                value={g.userInput}
-                onChange={e => handleInput(i, e.target.value)}
-                onKeyDown={e => handleKeyDown(e, i)}
-                disabled={checked}
-                placeholder="·····"
-                className={`w-full text-center font-mono text-lg font-bold tracking-widest px-2 py-2.5 rounded-lg border bg-secondary focus:outline-none transition-all ${
-                  checked && g.status === 'correct'
-                    ? 'border-emerald-500/50 text-emerald-400 bg-emerald-500/10'
-                    : checked && g.status === 'wrong'
-                    ? 'border-red-500/50 text-red-400 bg-red-500/10'
-                    : 'border-border text-foreground focus:border-primary/60'
-                }`}
-              />
-              {checked && g.status === 'wrong' && (
-                <div className="text-center text-xs font-mono font-bold text-primary">{g.text}</div>
-              )}
-            </div>
+            <span key={i} className="text-foreground">{g.text}</span>
           ))}
         </div>
-
-        <div className="mt-5 flex items-center justify-between flex-wrap gap-3">
-          {!checked ? (
-            <button onClick={handleCheck} className="btn-primary flex items-center gap-2">
-              <Icon name="CheckCircle2" size={17} />
-              Проверить
-            </button>
-          ) : (
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className={`text-lg font-black ${correctCount === groups.length ? 'text-emerald-400' : correctCount === 0 ? 'text-red-400' : 'text-primary'}`}>
-                {correctCount}/{groups.length} верно
-              </div>
-              <button onClick={handleNext} className="btn-primary flex items-center gap-2">
-                <Icon name="ArrowRight" size={17} />
-                Следующий набор
-              </button>
-            </div>
-          )}
+        <div className="mt-5 flex items-center gap-3 flex-wrap">
+          <button onClick={handleNext} className="btn-primary flex items-center gap-2">
+            <Icon name="ArrowRight" size={17} />
+            Следующий набор
+          </button>
           <button
             onClick={() => !isPlaying && handlePlay()}
             disabled={isPlaying}
@@ -275,17 +198,7 @@ export default function GroupTrainer() {
         </div>
       </div>
 
-      {/* Счёт */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="card-morse text-center">
-          <div className="text-3xl font-black text-primary">{score.correct}</div>
-          <div className="text-sm text-muted-foreground">Верных групп</div>
-        </div>
-        <div className="card-morse text-center">
-          <div className="text-3xl font-black text-foreground">{score.total}</div>
-          <div className="text-sm text-muted-foreground">Всего групп</div>
-        </div>
-      </div>
+
     </div>
   );
 }
