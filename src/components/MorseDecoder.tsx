@@ -15,13 +15,14 @@ const FFT_SIZE = 2048;
 const SAMPLE_RATE = 44100;
 const MIN_TONE_HZ = 300;
 const MAX_TONE_HZ = 1200;
-const NOISE_FLOOR = 0.015;
 const SPECTRUM_BINS = 80;
 
-// ── Типы ──────────────────────────────────────────────────────
-// 'char'  — декодированный символ
-// 'space' — пауза между словами (обычный пробел)
-// 'gap'   — увеличенная пауза внутри текста (двойной пробел)
+// Defaults
+const DEFAULT_MIC_SENS = 15;   // 1–100, чем меньше — тем чувствительнее
+const DEFAULT_LETTER_K = 2.0;  // межбуквенная пауза = k × dot
+const DEFAULT_GAP_K    = 4.0;  // увеличенная пауза
+const DEFAULT_WORD_K   = 7.0;  // пауза-слово
+
 interface DecodedToken {
   type: 'char' | 'space' | 'gap';
   ch: string;
@@ -39,59 +40,72 @@ export default function MorseDecoder() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [lang, setLang] = useState<'ru' | 'en' | 'both'>('both');
+  const [showSettings, setShowSettings] = useState(false);
 
-  const [detectedHz, setDetectedHz] = useState<number | null>(null);
+  // ── Настройки (state для UI + ref для RAF-loop) ────────────
+  const [micSens, setMicSens] = useState(DEFAULT_MIC_SENS);
+  const [letterK, setLetterK] = useState(DEFAULT_LETTER_K);
+  const [gapK, setGapK]       = useState(DEFAULT_GAP_K);
+  const [wordK, setWordK]      = useState(DEFAULT_WORD_K);
+  const micSensRef  = useRef(DEFAULT_MIC_SENS);
+  const letterKRef  = useRef(DEFAULT_LETTER_K);
+  const gapKRef     = useRef(DEFAULT_GAP_K);
+  const wordKRef    = useRef(DEFAULT_WORD_K);
+
+  const [detectedHz, setDetectedHz]   = useState<number | null>(null);
   const [detectedWpm, setDetectedWpm] = useState<number | null>(null);
   const [signalLevel, setSignalLevel] = useState(0);
-  const [toneActive, setToneActive] = useState(false);
+  const [toneActive, setToneActive]   = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [tokens, setTokens] = useState<DecodedToken[]>([]);
+  const [tokens, setTokens]           = useState<DecodedToken[]>([]);
   const [currentSymbols, setCurrentSymbols] = useState<string>('');
 
-  // Время начала сеанса
   const sessionStartRef = useRef<Date | null>(null);
 
   // Audio refs
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const freqDataRef = useRef<Float32Array | null>(null);
-  const timeDataRef = useRef<Float32Array | null>(null);
+  const audioCtxRef  = useRef<AudioContext | null>(null);
+  const analyserRef  = useRef<AnalyserNode | null>(null);
+  const streamRef    = useRef<MediaStream | null>(null);
+  const rafRef       = useRef<number | null>(null);
+  const freqDataRef  = useRef<Float32Array | null>(null);
+  const timeDataRef  = useRef<Float32Array | null>(null);
 
   // Morse state refs
-  const toneOnTimeRef = useRef<number>(0);
-  const toneOffTimeRef = useRef<number>(0);
-  const lastToneRef = useRef<boolean>(false);
-  const currentSymRef = useRef<string[]>([]);
-  const dotEstimateRef = useRef<number>(80);
+  const toneOnTimeRef      = useRef<number>(0);
+  const toneOffTimeRef     = useRef<number>(0);
+  const lastToneRef        = useRef<boolean>(false);
+  const currentSymRef      = useRef<string[]>([]);
+  const dotEstimateRef     = useRef<number>(80);
   const recentDurationsRef = useRef<number[]>([]);
-  const lockedHzRef = useRef<number | null>(null);
-  const hzHistoryRef = useRef<number[]>([]);
+  const lockedHzRef        = useRef<number | null>(null);
+  const hzHistoryRef       = useRef<number[]>([]);
+
+  // Синхронизируем refs с state (работает без перезапуска)
+  useEffect(() => { micSensRef.current = micSens; }, [micSens]);
+  useEffect(() => { letterKRef.current = letterK; }, [letterK]);
+  useEffect(() => { gapKRef.current    = gapK;    }, [gapK]);
+  useEffect(() => { wordKRef.current   = wordK;   }, [wordK]);
 
   // ── Утилиты спектра ──────────────────────────────────────────
-  const hzToIndex = (hz: number, sampleRate: number, fftSize: number) =>
-    Math.round((hz / sampleRate) * fftSize);
+  const hzToIndex = (hz: number, sr: number, fft: number) =>
+    Math.round((hz / sr) * fft);
 
-  const findDominantHz = (data: Float32Array, sampleRate: number, fftSize: number): number | null => {
-    const lo = hzToIndex(MIN_TONE_HZ, sampleRate, fftSize);
-    const hi = hzToIndex(MAX_TONE_HZ, sampleRate, fftSize);
+  const findDominantHz = (data: Float32Array, sr: number, fft: number): number | null => {
+    const lo = hzToIndex(MIN_TONE_HZ, sr, fft);
+    const hi = hzToIndex(MAX_TONE_HZ, sr, fft);
     let maxDb = -200, maxIdx = -1;
     for (let i = lo; i <= hi; i++) {
       if (data[i] > maxDb) { maxDb = data[i]; maxIdx = i; }
     }
     if (maxIdx < 0 || maxDb < -60) return null;
-    return (maxIdx / fftSize) * sampleRate;
+    return (maxIdx / fft) * sr;
   };
 
   // ── Рисование спектра ─────────────────────────────────────────
   const drawSpectrum = useCallback((
-    freqDb: Float32Array,
-    sampleRate: number,
-    fftSize: number,
-    lockedHz: number | null,
-    isTone: boolean
+    freqDb: Float32Array, sr: number, fft: number,
+    lockedHz: number | null, isTone: boolean, noiseFloor: number
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -103,22 +117,22 @@ export default function MorseDecoder() {
     ctx.fillRect(0, 0, W, H);
 
     const displayLo = 200, displayHi = 1400;
-    const loIdx = hzToIndex(displayLo, sampleRate, fftSize);
-    const hiIdx = hzToIndex(displayHi, sampleRate, fftSize);
+    const loIdx = hzToIndex(displayLo, sr, fft);
+    const hiIdx = hzToIndex(displayHi, sr, fft);
     const range = hiIdx - loIdx;
     const binW = W / SPECTRUM_BINS;
 
     for (let b = 0; b < SPECTRUM_BINS; b++) {
-      const startIdx = loIdx + Math.floor((b / SPECTRUM_BINS) * range);
-      const endIdx = loIdx + Math.floor(((b + 1) / SPECTRUM_BINS) * range);
+      const s = loIdx + Math.floor((b / SPECTRUM_BINS) * range);
+      const e = loIdx + Math.floor(((b + 1) / SPECTRUM_BINS) * range);
       let maxVal = -160;
-      for (let i = startIdx; i < endIdx && i < freqDb.length; i++) {
+      for (let i = s; i < e && i < freqDb.length; i++) {
         if (freqDb[i] > maxVal) maxVal = freqDb[i];
       }
       const norm = Math.max(0, (maxVal + 100) / 60);
       const barH = norm * H * 0.9;
       const hz = displayLo + ((b + 0.5) / SPECTRUM_BINS) * (displayHi - displayLo);
-      const inRange = hz >= MIN_TONE_HZ && hz <= MAX_TONE_HZ;
+      const inRange  = hz >= MIN_TONE_HZ && hz <= MAX_TONE_HZ;
       const nearLocked = lockedHz && Math.abs(hz - lockedHz) < 40;
 
       ctx.fillStyle =
@@ -128,6 +142,15 @@ export default function MorseDecoder() {
         'rgba(100,116,139,0.3)';
       ctx.fillRect(b * binW + 1, H - barH, binW - 2, barH);
     }
+
+    // Линия порога чувствительности
+    const threshNorm = Math.max(0, (20 * Math.log10(noiseFloor) + 100) / 60);
+    const threshY = H - threshNorm * H * 0.9;
+    ctx.strokeStyle = 'rgba(239,68,68,0.45)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath(); ctx.moveTo(0, threshY); ctx.lineTo(W, threshY); ctx.stroke();
+    ctx.setLineDash([]);
 
     ctx.fillStyle = 'rgba(148,163,184,0.7)';
     ctx.font = '10px monospace';
@@ -158,25 +181,21 @@ export default function MorseDecoder() {
     if (syms.length > 0) {
       const code = syms.join('');
       const ch = MORSE_REVERSE[code] ?? '?';
-
       const isRu = ch in MORSE_RU;
       const isEn = ch in MORSE_EN;
       const isDig = ch in MORSE_DIGITS;
       let show = true;
       if (lang === 'ru' && !isRu && !isDig) show = false;
       if (lang === 'en' && !isEn && !isDig) show = false;
-
       if (show) {
         setTokens(prev => [...prev.slice(-300), { type: 'char', ch, code, ts: Date.now() }]);
       }
       currentSymRef.current = [];
       setCurrentSymbols('');
     }
-
     if (pauseType === 'word') {
       setTokens(prev => [...prev.slice(-300), { type: 'space', ch: ' ', code: '', ts: Date.now() }]);
     } else if (pauseType === 'gap') {
-      // увеличенная пауза — двойной пробел
       setTokens(prev => [...prev.slice(-300), { type: 'gap', ch: '  ', code: '', ts: Date.now() }]);
     }
   }, [lang]);
@@ -187,14 +206,14 @@ export default function MorseDecoder() {
       const offDur = now - toneOffTimeRef.current;
       if (toneOffTimeRef.current > 0) {
         const dot = dotEstimateRef.current;
-        if (offDur > dot * 7) {
-          // длинная пауза — новое слово
+        const lk = letterKRef.current;
+        const gk = gapKRef.current;
+        const wk = wordKRef.current;
+        if (offDur > dot * wk) {
           flushLetter('word');
-        } else if (offDur > dot * 4) {
-          // увеличенная пауза — двойной пробел
+        } else if (offDur > dot * gk) {
           flushLetter('gap');
-        } else if (offDur > dot * 2) {
-          // межбуквенная пауза
+        } else if (offDur > dot * lk) {
           flushLetter('letter');
         }
       }
@@ -224,17 +243,22 @@ export default function MorseDecoder() {
     rafRef.current = requestAnimationFrame(tick);
     if (!analyserRef.current || !freqDataRef.current || !timeDataRef.current) return;
 
-    const sampleRate = audioCtxRef.current?.sampleRate ?? SAMPLE_RATE;
+    const sr = audioCtxRef.current?.sampleRate ?? SAMPLE_RATE;
     analyserRef.current.getFloatFrequencyData(freqDataRef.current);
     analyserRef.current.getFloatTimeDomainData(timeDataRef.current);
 
+    // RMS
     let rms = 0;
     for (let i = 0; i < timeDataRef.current.length; i++) rms += timeDataRef.current[i] ** 2;
     rms = Math.sqrt(rms / timeDataRef.current.length);
     setSignalLevel(Math.min(1, rms * 6));
 
-    const domHz = findDominantHz(freqDataRef.current, sampleRate, FFT_SIZE);
-    if (domHz && rms > NOISE_FLOOR * 0.5) {
+    // Порог чувствительности из настроек: sens 1-100 → noiseFloor 0.002..0.08
+    const noiseFloor = 0.002 + (micSensRef.current / 100) * 0.078;
+
+    // Обнаружение доминантной частоты
+    const domHz = findDominantHz(freqDataRef.current, sr, FFT_SIZE);
+    if (domHz && rms > noiseFloor * 0.5) {
       hzHistoryRef.current = [...hzHistoryRef.current.slice(-4), domHz];
       const avgHz = hzHistoryRef.current.reduce((a, b) => a + b, 0) / hzHistoryRef.current.length;
       if (!lockedHzRef.current) {
@@ -245,22 +269,23 @@ export default function MorseDecoder() {
       setDetectedHz(Math.round(lockedHzRef.current));
     }
 
+    // Детектирование тона
     let isTone = false;
     if (lockedHzRef.current) {
-      const centerIdx = hzToIndex(lockedHzRef.current, sampleRate, FFT_SIZE);
-      const bw = Math.max(2, hzToIndex(60, sampleRate, FFT_SIZE));
+      const ci = hzToIndex(lockedHzRef.current, sr, FFT_SIZE);
+      const bw = Math.max(2, hzToIndex(60, sr, FFT_SIZE));
       let energy = 0;
-      for (let i = Math.max(0, centerIdx - bw); i <= Math.min(freqDataRef.current.length - 1, centerIdx + bw); i++) {
+      for (let i = Math.max(0, ci - bw); i <= Math.min(freqDataRef.current.length - 1, ci + bw); i++) {
         energy += Math.pow(10, freqDataRef.current[i] / 20);
       }
-      isTone = energy > NOISE_FLOOR * (bw * 2 + 1);
+      isTone = energy > noiseFloor * (bw * 2 + 1);
     } else {
-      isTone = rms > NOISE_FLOOR;
+      isTone = rms > noiseFloor;
     }
 
     setToneActive(isTone);
     processToneChange(isTone, performance.now());
-    drawSpectrum(freqDataRef.current, sampleRate, FFT_SIZE, lockedHzRef.current, isTone);
+    drawSpectrum(freqDataRef.current, sr, FFT_SIZE, lockedHzRef.current, isTone, noiseFloor);
   }, [processToneChange, drawSpectrum]);
 
   // ── Запуск / остановка ────────────────────────────────────────
@@ -280,17 +305,17 @@ export default function MorseDecoder() {
       source.connect(analyser);
       analyserRef.current = analyser;
       freqDataRef.current = new Float32Array(analyser.frequencyBinCount);
-      timeDataRef.current = new Float32Array(analyser.fftSize);
+      timeDataRef.current  = new Float32Array(analyser.fftSize);
 
-      currentSymRef.current = [];
+      currentSymRef.current      = [];
       recentDurationsRef.current = [];
-      dotEstimateRef.current = 80;
-      lockedHzRef.current = null;
-      hzHistoryRef.current = [];
-      toneOnTimeRef.current = 0;
-      toneOffTimeRef.current = 0;
-      lastToneRef.current = false;
-      sessionStartRef.current = new Date();
+      dotEstimateRef.current     = 80;
+      lockedHzRef.current        = null;
+      hzHistoryRef.current       = [];
+      toneOnTimeRef.current      = 0;
+      toneOffTimeRef.current     = 0;
+      lastToneRef.current        = false;
+      sessionStartRef.current    = new Date();
       setTokens([]);
       setCurrentSymbols('');
       setDetectedHz(null);
@@ -321,31 +346,37 @@ export default function MorseDecoder() {
   }, []);
 
   const handleReset = () => {
-    currentSymRef.current = [];
+    currentSymRef.current      = [];
     recentDurationsRef.current = [];
-    dotEstimateRef.current = 80;
-    lockedHzRef.current = null;
-    hzHistoryRef.current = [];
-    toneOnTimeRef.current = 0;
-    toneOffTimeRef.current = 0;
-    lastToneRef.current = false;
-    sessionStartRef.current = running ? new Date() : null;
+    dotEstimateRef.current     = 80;
+    lockedHzRef.current        = null;
+    hzHistoryRef.current       = [];
+    toneOnTimeRef.current      = 0;
+    toneOffTimeRef.current     = 0;
+    lastToneRef.current        = false;
+    sessionStartRef.current    = running ? new Date() : null;
     setTokens([]);
     setCurrentSymbols('');
     setDetectedHz(null);
     setDetectedWpm(null);
   };
 
+  const handleResetSettings = () => {
+    setMicSens(DEFAULT_MIC_SENS);
+    setLetterK(DEFAULT_LETTER_K);
+    setGapK(DEFAULT_GAP_K);
+    setWordK(DEFAULT_WORD_K);
+  };
+
   // ── Сохранение в файл ─────────────────────────────────────────
   const handleSave = () => {
-    const sessionStart = sessionStartRef.current ?? new Date();
-    const sessionEnd = new Date();
-    const text = tokens.map(t => t.ch).join('').trim();
-
+    const sStart = sessionStartRef.current ?? new Date();
+    const sEnd   = new Date();
+    const text   = tokens.map(t => t.ch).join('').trim();
     const content = [
       `Сеанс декодирования азбуки Морзе`,
-      `Начало:    ${formatDateTime(sessionStart)}`,
-      `Конец:     ${formatDateTime(sessionEnd)}`,
+      `Начало:    ${formatDateTime(sStart)}`,
+      `Конец:     ${formatDateTime(sEnd)}`,
       `Частота:   ${detectedHz ?? '—'} Гц`,
       `Скорость:  ${detectedWpm ?? '—'} зн/мин`,
       ``,
@@ -356,10 +387,10 @@ export default function MorseDecoder() {
     ].join('\n');
 
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const ts = sessionStart.toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    const ts   = sStart.toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
     a.download = `morse_${ts}.txt`;
     a.click();
     URL.revokeObjectURL(url);
@@ -367,14 +398,13 @@ export default function MorseDecoder() {
 
   useEffect(() => () => stop(), [stop]);
 
-  const decodedText = tokens.map(t => t.ch).join('');
-  const charCount = tokens.filter(t => t.type === 'char').length;
+  const charCount  = tokens.filter(t => t.type === 'char').length;
   const hasContent = tokens.length > 0 || !!currentSymbols;
 
   return (
     <div className="space-y-4 animate-fade-in">
 
-      {/* Панель управления */}
+      {/* ── Панель управления ── */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 bg-secondary p-1 rounded-xl">
           {(['both', 'ru', 'en'] as const).map(l => (
@@ -398,6 +428,13 @@ export default function MorseDecoder() {
           </button>
         )}
 
+        <button
+          onClick={() => setShowSettings(s => !s)}
+          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-all ${showSettings ? 'border-primary/40 text-primary bg-primary/10' : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'}`}>
+          <Icon name="SlidersHorizontal" size={12} />
+          Настройки
+        </button>
+
         <div className="flex items-center gap-2 ml-auto">
           {hasContent && (
             <>
@@ -416,6 +453,122 @@ export default function MorseDecoder() {
         </div>
       </div>
 
+      {/* ── Панель настроек ── */}
+      {showSettings && (
+        <div className="card-morse border-primary/20 space-y-5 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Настройки декодирования</div>
+            <button onClick={handleResetSettings}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors">
+              <Icon name="RotateCcw" size={11} />
+              По умолчанию
+            </button>
+          </div>
+
+          {/* Чувствительность микрофона */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="text-sm font-medium text-foreground flex items-center gap-2">
+                <Icon name="Mic" size={14} className="text-primary" />
+                Чувствительность микрофона
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {micSens <= 20 ? 'Очень высокая' : micSens <= 40 ? 'Высокая' : micSens <= 60 ? 'Средняя' : micSens <= 80 ? 'Низкая' : 'Очень низкая'}
+                </span>
+                <span className="font-mono text-xs text-primary w-6 text-right">{micSens}</span>
+              </div>
+            </div>
+            <input type="range" min={1} max={100} step={1} value={micSens}
+              onChange={e => setMicSens(Number(e.target.value))}
+              className="w-full accent-[hsl(var(--primary))]" />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Меньше = реагирует на слабый сигнал, но может ловить шум. Больше = только громкий сигнал.
+              Красная линия на спектре показывает текущий порог.
+            </p>
+          </div>
+
+          {/* Пороги паузы */}
+          <div className="space-y-4">
+            <div className="text-sm font-medium text-foreground flex items-center gap-2">
+              <Icon name="Timer" size={14} className="text-primary" />
+              Пороги паузы (в длительностях точки)
+            </div>
+
+            <div className="grid sm:grid-cols-3 gap-4">
+              {/* Межбуквенная */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Буква</span>
+                  <span className="font-mono text-xs text-primary">{letterK.toFixed(1)}×</span>
+                </div>
+                <input type="range" min={1.5} max={4.0} step={0.1} value={letterK}
+                  onChange={e => {
+                    const v = Number(e.target.value);
+                    setLetterK(v);
+                    if (v >= gapK) setGapK(Math.min(10, v + 0.5));
+                  }}
+                  className="w-full accent-[hsl(var(--primary))]" />
+                <p className="mt-1 text-xs text-muted-foreground">Разделяет знаки одной буквы от разных</p>
+              </div>
+
+              {/* Двойной пробел */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Двойной пробел</span>
+                  <span className="font-mono text-xs text-primary">{gapK.toFixed(1)}×</span>
+                </div>
+                <input type="range" min={2.0} max={8.0} step={0.5} value={gapK}
+                  onChange={e => {
+                    const v = Number(e.target.value);
+                    setGapK(v);
+                    if (v <= letterK) setLetterK(Math.max(1.5, v - 0.5));
+                    if (v >= wordK)   setWordK(Math.min(15, v + 1));
+                  }}
+                  className="w-full accent-[hsl(var(--primary))]" />
+                <p className="mt-1 text-xs text-muted-foreground">Увеличенная пауза (замедление, граница группы)</p>
+              </div>
+
+              {/* Слово */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-muted-foreground">Новое слово</span>
+                  <span className="font-mono text-xs text-primary">{wordK.toFixed(1)}×</span>
+                </div>
+                <input type="range" min={4.0} max={15.0} step={0.5} value={wordK}
+                  onChange={e => {
+                    const v = Number(e.target.value);
+                    setWordK(v);
+                    if (v <= gapK) setGapK(Math.max(2, v - 1));
+                  }}
+                  className="w-full accent-[hsl(var(--primary))]" />
+                <p className="mt-1 text-xs text-muted-foreground">Пауза длиннее этого = пробел между словами</p>
+              </div>
+            </div>
+
+            {/* Наглядная шкала */}
+            <div className="flex items-center gap-1 text-xs text-muted-foreground bg-secondary/50 rounded-lg px-3 py-2">
+              <span className="font-mono text-foreground">0</span>
+              <div className="flex-1 flex">
+                <div className="bg-primary/20 rounded-l h-4 flex items-center justify-center text-[10px] font-mono text-primary/70 px-1" style={{ flex: letterK }}>знак</div>
+                <div className="bg-amber-500/20 h-4 flex items-center justify-center text-[10px] font-mono text-amber-400/70 px-1" style={{ flex: gapK - letterK }}>буква</div>
+                <div className="bg-violet-500/20 h-4 flex items-center justify-center text-[10px] font-mono text-violet-400/70 px-1" style={{ flex: wordK - gapK }}>2×пробел</div>
+                <div className="bg-emerald-500/20 rounded-r h-4 flex items-center justify-center text-[10px] font-mono text-emerald-400/70 px-1" style={{ flex: 2 }}>слово</div>
+              </div>
+            </div>
+          </div>
+
+          {detectedWpm && (
+            <div className="text-xs text-muted-foreground border-t border-border pt-3">
+              Текущая длина точки: <span className="font-mono text-primary">{Math.round(dotEstimateRef.current)} мс</span>
+              {' · '}Буква = <span className="font-mono text-amber-400">{Math.round(dotEstimateRef.current * letterK)} мс</span>
+              {' · '}2×пробел = <span className="font-mono text-violet-400">{Math.round(dotEstimateRef.current * gapK)} мс</span>
+              {' · '}Слово = <span className="font-mono text-emerald-400">{Math.round(dotEstimateRef.current * wordK)} мс</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
           <Icon name="AlertCircle" size={16} />
@@ -423,7 +576,7 @@ export default function MorseDecoder() {
         </div>
       )}
 
-      {/* Спектр */}
+      {/* ── Спектр ── */}
       <div className="card-morse p-0 overflow-hidden">
         <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-wrap gap-2">
           <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Спектр сигнала</div>
@@ -450,7 +603,7 @@ export default function MorseDecoder() {
           style={{ display: 'block', background: 'rgba(0,0,0,0.15)' }} />
       </div>
 
-      {/* Индикатор уровня */}
+      {/* ── Индикатор уровня ── */}
       {running && (
         <div className="flex items-center gap-3">
           <span className="text-xs text-muted-foreground uppercase tracking-wider w-16 shrink-0">Сигнал</span>
@@ -466,7 +619,7 @@ export default function MorseDecoder() {
         </div>
       )}
 
-      {/* Текущий символ */}
+      {/* ── Текущий символ ── */}
       {running && (
         <div className="flex items-center gap-3 min-h-8">
           <span className="text-xs text-muted-foreground uppercase tracking-wider w-16 shrink-0">Буква</span>
@@ -476,7 +629,7 @@ export default function MorseDecoder() {
         </div>
       )}
 
-      {/* Декодированный текст */}
+      {/* ── Декодированный текст ── */}
       <div className="card-morse min-h-36">
         <div className="flex items-center justify-between mb-3">
           <div className="text-xs text-muted-foreground uppercase tracking-wider">
@@ -485,9 +638,8 @@ export default function MorseDecoder() {
           </div>
           {charCount > 0 && (
             <button
-              onClick={() => navigator.clipboard?.writeText(decodedText.trim())}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
+              onClick={() => navigator.clipboard?.writeText(tokens.map(t => t.ch).join('').trim())}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
               <Icon name="Copy" size={11} />
               Копировать
             </button>
@@ -503,21 +655,11 @@ export default function MorseDecoder() {
 
         <div className="font-mono text-2xl font-bold tracking-widest text-foreground leading-relaxed break-all">
           {tokens.map((t, i) => {
-            if (t.type === 'char') {
-              return (
-                <span key={i} title={t.code}
-                  className="text-foreground hover:text-primary transition-colors cursor-default">
-                  {t.ch}
-                </span>
-              );
-            }
-            if (t.type === 'space') {
-              return <span key={i} className="inline-block w-5" />;
-            }
-            if (t.type === 'gap') {
-              // увеличенная пауза — двойной пробел с пунктирным разделителем
-              return <span key={i} className="inline-block w-10 border-b border-dashed border-primary/25 mx-0.5" />;
-            }
+            if (t.type === 'char') return (
+              <span key={i} title={t.code} className="text-foreground hover:text-primary transition-colors cursor-default">{t.ch}</span>
+            );
+            if (t.type === 'space') return <span key={i} className="inline-block w-5" />;
+            if (t.type === 'gap')   return <span key={i} className="inline-block w-10 border-b border-dashed border-primary/25 mx-0.5" />;
             return null;
           })}
           {currentSymbols && running && (
@@ -526,7 +668,7 @@ export default function MorseDecoder() {
         </div>
       </div>
 
-      {/* Подсказка */}
+      {/* ── Подсказка ── */}
       {!running && (
         <div className="rounded-xl p-4 bg-secondary/50 border border-border/40 text-sm text-muted-foreground space-y-1.5">
           <div className="flex items-start gap-2">
@@ -537,7 +679,7 @@ export default function MorseDecoder() {
           </div>
           <div className="pl-5">
             Диапазон: <span className="font-mono text-primary">{MIN_TONE_HZ}–{MAX_TONE_HZ} Гц</span>
-            {' · '}увеличенная пауза между символами отображается двойным пробелом (─).
+            {' · '}при нестабильном декодировании откройте <strong>Настройки</strong> и подберите чувствительность и пороги паузы.
           </div>
         </div>
       )}
