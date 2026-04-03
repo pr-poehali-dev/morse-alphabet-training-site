@@ -21,7 +21,28 @@ const MORSE_DIGITS: Record<string, string> = {
   '5': '.....', '6': '-....', '7': '--...', '8': '---..', '9': '----.',
 };
 
-export const MORSE_TABLE = { ...MORSE_RU, ...MORSE_EN, ...MORSE_DIGITS };
+const MORSE_SPECIAL: Record<string, string> = {
+  '.': '.-.-.-',   // Точка
+  ',': '--..--',   // Запятая
+  '?': '..--..',   // Вопрос
+  '!': '-.-.--',   // Восклицание
+  '/': '-..-.',    // Дробь / разделитель
+  '-': '-....-',   // Дефис
+  '(': '-.--.',    // Скобка открыв.
+  ')': '-.--.-',   // Скобка закрыв.
+  '"': '.-..-.',   // Кавычка
+  '\'': '.----.',  // Апостроф
+  ':': '---...',   // Двоеточие
+  ';': '-.-.-.',   // Точка с запятой
+  '=': '-...-',    // Знак равенства / BT (конец абзаца)
+  '+': '.-.-.',    // Плюс / AR (конец передачи)
+  '@': '.--.-.',   // Коммерческое at (AC)
+  '&': '.-...',    // Амперсанд / AS (ожидание)
+  '_': '..--.-',   // Нижнее подчёркивание
+  '$': '...-..-',  // Доллар (SX)
+};
+
+export const MORSE_TABLE = { ...MORSE_RU, ...MORSE_EN, ...MORSE_DIGITS, ...MORSE_SPECIAL };
 
 export function textToMorse(text: string): string {
   return text.toUpperCase().split('').map(char => {
@@ -122,4 +143,4 @@ export function useMorse() {
   return { playMorse, playLetter, playTone, stop, MORSE_TABLE };
 }
 
-export { MORSE_RU, MORSE_EN, MORSE_DIGITS };
+export { MORSE_RU, MORSE_EN, MORSE_DIGITS, MORSE_SPECIAL };

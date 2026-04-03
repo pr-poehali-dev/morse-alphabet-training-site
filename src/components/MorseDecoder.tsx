@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
-import { MORSE_RU, MORSE_EN, MORSE_DIGITS } from '@/hooks/useMorse';
+import { MORSE_RU, MORSE_EN, MORSE_DIGITS, MORSE_SPECIAL } from '@/hooks/useMorse';
 
 // ── Таблицы декодирования ──────────────────────────────────────
 const MORSE_REVERSE: Record<string, string> = {};
@@ -9,6 +9,7 @@ for (const [ch, code] of Object.entries(MORSE_EN)) {
   if (!MORSE_REVERSE[code]) MORSE_REVERSE[code] = ch;
 }
 for (const [ch, code] of Object.entries(MORSE_DIGITS)) MORSE_REVERSE[code] = ch;
+for (const [ch, code] of Object.entries(MORSE_SPECIAL)) MORSE_REVERSE[code] = ch;
 
 // ── Константы ─────────────────────────────────────────────────
 const FFT_SIZE      = 2048;
@@ -229,12 +230,13 @@ export default function MorseDecoder() {
     if (syms.length > 0) {
       const code  = syms.join('');
       const ch    = MORSE_REVERSE[code] ?? '?';
-      const isRu  = ch in MORSE_RU;
-      const isEn  = ch in MORSE_EN;
-      const isDig = ch in MORSE_DIGITS;
+      const isRu   = ch in MORSE_RU;
+      const isEn   = ch in MORSE_EN;
+      const isDig  = ch in MORSE_DIGITS;
+      const isSpec = ch in MORSE_SPECIAL;
       let show = true;
-      if (langRef.current === 'ru' && !isRu && !isDig) show = false;
-      if (langRef.current === 'en' && !isEn && !isDig) show = false;
+      if (langRef.current === 'ru' && !isRu && !isDig && !isSpec) show = false;
+      if (langRef.current === 'en' && !isEn && !isDig && !isSpec) show = false;
       if (show) {
         setTokensRef.current(prev => [...prev.slice(-300), { type: 'char', ch, code, ts: Date.now() }]);
       }
